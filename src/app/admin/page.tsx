@@ -9,9 +9,15 @@ import { useRouter } from "next/navigation";
 
 export default function AdminHome() {
   const router = useRouter();
+
   const [ready, setReady] = useState(false);
   const [user, setUser] = useState<User | null>(null);
-  const [isAdmin, setIsAdmin] = useState(false);
+
+  // Darf Admin-Zentrale sehen: admin ODER owner
+  const [hasAdminAccess, setHasAdminAccess] = useState(false);
+
+  // Owner-only Features (Userverwaltung)
+  const [isOwner, setIsOwner] = useState(false);
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (u) => {
@@ -26,8 +32,13 @@ export default function AdminHome() {
       try {
         const snap = await getDoc(doc(db, "users", u.uid));
         const role = (snap.data()?.role ?? "user") as string;
-        const ok = role === "admin";
-        setIsAdmin(ok);
+
+        const owner = role === "owner";
+        const ok = role === "admin" || owner;
+
+        setIsOwner(owner);
+        setHasAdminAccess(ok);
+
         if (!ok) router.replace("/");
       } catch {
         router.replace("/");
@@ -45,7 +56,7 @@ export default function AdminHome() {
     );
   }
 
-  if (!user || !isAdmin) {
+  if (!user || !hasAdminAccess) {
     return (
       <main style={{ padding: 24, fontFamily: "sans-serif" }}>
         <p>Keine Berechtigung.</p>
@@ -56,9 +67,7 @@ export default function AdminHome() {
   return (
     <main style={{ padding: 24, fontFamily: "sans-serif" }}>
       <h1 style={{ marginTop: 0 }}>Admin-Zentrale</h1>
-      <p style={{ opacity: 0.75 }}>
-        Hier sind alle Admin-Tools gebündelt.
-      </p>
+      <p style={{ opacity: 0.75 }}>Hier sind alle Admin-Tools gebündelt.</p>
 
       <div style={{ display: "grid", gap: 12, marginTop: 16 }}>
         <Card
@@ -76,12 +85,16 @@ export default function AdminHome() {
           desc="Kategorien anlegen, bearbeiten, löschen, deaktivieren."
           href="/admin/categories"
         />
-        <Card
-          title="Nutzer & Rollen"
-          desc="Später: aktive Nutzer sehen, Rollen setzen, Einladungen/Whitelist."
-          href="/admin/users"
-          badge="später"
-        />
+
+        {/* Nutzerverwaltung ist Owner-only */}
+        {isOwner && (
+          <Card
+            title="Nutzerverwaltung"
+            desc="Whitelist verwalten, Nutzer freigeben/ablehnen, Adminrechte vergeben/entziehen."
+            href="/admin/users"
+            badge="owner"
+          />
+        )}
       </div>
     </main>
   );

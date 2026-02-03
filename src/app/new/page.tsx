@@ -11,11 +11,15 @@ import {
   setDoc,
   doc,
   where,
-  updateDoc,
 } from "firebase/firestore";
 import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
 import { useRouter } from "next/navigation";
 import { auth, db, storage } from "@/lib/firebase";
+import {
+  computeReceiptDateTsFromString,
+  createReceiptCreateRevision,
+  updateReceiptWithRevision,
+} from "@/lib/receiptActions";
 
 type Category = {
   id: string;
@@ -137,6 +141,9 @@ export default function NewReceiptPage() {
         { merge: true }
       );
 
+      // ✅ receiptDateTs zusätzlich speichern (Timestamp)
+      const receiptDateTs = computeReceiptDateTsFromString(receiptDate);
+
       // 1) Receipt anlegen
       const receiptRef = await addDoc(collection(db, "receipts"), {
         ownerUserId: authUser.uid,
@@ -148,7 +155,8 @@ export default function NewReceiptPage() {
         amountCents,
         currency: "EUR",
 
-        receiptDate,
+        receiptDate, // string
+        receiptDateTs: receiptDateTs ?? null, // ✅ neu
         submittedAt: serverTimestamp(),
 
         // ✅ Soft delete marker
@@ -165,6 +173,12 @@ export default function NewReceiptPage() {
 
       const receiptId = receiptRef.id;
 
+      // ✅ optional (aber sauber): Create-Revision schreiben
+      await createReceiptCreateRevision({
+        receiptId,
+        editedByUserId: authUser.uid,
+      });
+
       // 2) Upload nach Storage
       const safeName = file.name.replaceAll("/", "_").replaceAll("\\", "_");
       const storagePath = `receipts/${authUser.uid}/${receiptId}/${safeName}`;
@@ -173,10 +187,19 @@ export default function NewReceiptPage() {
       await uploadBytes(storageRef, file);
       const downloadUrl = await getDownloadURL(storageRef);
 
-      // 3) Receipt updaten
-      await updateDoc(doc(db, "receipts", receiptId), {
-        "file.storagePath": storagePath,
-        "file.downloadUrl": downloadUrl,
+      // 3) Receipt updaten (MIT Revision)
+      await updateReceiptWithRevision({
+        receiptId,
+        editedByUserId: authUser.uid,
+        patch: {
+          file: {
+            name: file.name,
+            type: file.type || "application/octet-stream",
+            size: file.size,
+            storagePath,
+            downloadUrl,
+          },
+        },
       });
 
       router.push("/");
@@ -190,8 +213,12 @@ export default function NewReceiptPage() {
   if (!authReady) {
     return (
       <main style={{ padding: 24, fontFamily: "sans-serif" }}>
-        <p><b>Auth wird geladen…</b></p>
-        <p style={{ opacity: 0.7 }}>Wenn das länger als 2 Sekunden dauert, sag kurz Bescheid.</p>
+        <p>
+          <b>Auth wird geladen…</b>
+        </p>
+        <p style={{ opacity: 0.7 }}>
+          Wenn das länger als 2 Sekunden dauert, sag kurz Bescheid.
+        </p>
       </main>
     );
   }
@@ -215,7 +242,12 @@ export default function NewReceiptPage() {
             value={categoryId}
             onChange={(e) => setCategoryId(e.target.value)}
             disabled={loadingCats || categories.length === 0}
-            style={{ width: "100%", padding: 10, borderRadius: 8, border: "1px solid #ccc" }}
+            style={{
+              width: "100%",
+              padding: 10,
+              borderRadius: 8,
+              border: "1px solid #ccc",
+            }}
           >
             {categories.map((c) => (
               <option key={c.id} value={c.id}>
@@ -238,7 +270,12 @@ export default function NewReceiptPage() {
             onChange={(e) => setAmount(e.target.value)}
             placeholder="z.B. 12,34"
             inputMode="decimal"
-            style={{ width: "100%", padding: 10, borderRadius: 8, border: "1px solid #ccc" }}
+            style={{
+              width: "100%",
+              padding: 10,
+              borderRadius: 8,
+              border: "1px solid #ccc",
+            }}
           />
         </label>
 
@@ -248,7 +285,12 @@ export default function NewReceiptPage() {
             type="date"
             value={receiptDate}
             onChange={(e) => setReceiptDate(e.target.value)}
-            style={{ width: "100%", padding: 10, borderRadius: 8, border: "1px solid #ccc" }}
+            style={{
+              width: "100%",
+              padding: 10,
+              borderRadius: 8,
+              border: "1px solid #ccc",
+            }}
           />
         </label>
 
